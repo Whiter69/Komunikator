@@ -2,31 +2,37 @@ import socket
 import threading
 import json
 import queue
+from crypto import AESCipher
 
 
-class NetworkCore:
+class SecureNetwork:
     def __init__(self):
         self.socket = None
-        self.net_queue = queue.Queue()
+        self.queue = queue.Queue()
+        self.crypto = AESCipher()
 
-    def connect(self, ip, port):
-
+    def connect_and_auth(self, ip, action, user, pwd):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((ip, port))
-        threading.Thread(target=self.receive_loop, daemon=True).start()
+        self.socket.connect((ip, 5050))
 
-    def receive_loop(self):
-        try:
-            stream = self.socket.makefile("r", encoding="utf-8")
-            for line in stream:
-                if line.strip():
-                    packet = json.loads(line.strip())
-                    self.net_queue.put(packet)
-        except Exception as e:
-            self.net_queue.put({"type": "error", "message": str(e)})
+        auth_pkt = {"action": action, "user": user, "pass": pwd}
+        self.socket.sendall((json.dumps(auth_pkt) + "\n").encode("utf-8"))
 
-    def send_packet(self, packet_dict):
+        resp = json.loads(self.socket.makefile("r", encoding="utf-8").readline())
+        if resp["status"] == "ok":
+            threading.Thread(target=self.recv_loop, daemon=True).start()
+            return True, resp["message"]
+        return False, resp["message"]
 
-        if self.socket:
-            data = (json.dumps(packet_dict) + "\n").encode("utf-8")
-            self.socket.sendall(data)
+    def send_secure_msg(self, text):
+        encrypted_body = self.crypto.encrypt(text)
+        packet = {"type": "msg", "body": encrypted_body}
+        self.socket.sendall((json.dumps(packet) + "\n").encode("utf-8"))
+
+    def recv_loop(self):
+        stream = self.socket.makefile("r", encoding="utf-8")
+        for line in stream:
+            packet = json.loads(line.strip())
+            if "body" in packet:
+                packet["body"] = self.crypto.decrypt(packet["body"])
+            self.queue.put(packet)
