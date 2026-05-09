@@ -1,12 +1,18 @@
 import socket
 import threading
 import json
+from datetime import datetime
 from database import ChatDatabase
+
 
 class SecureRelayServer:
     def __init__(self):
         self.clients = {}
         self.db = ChatDatabase()
+
+    def broadcast_roster(self):
+        users_online = [{"name": name} for name in self.clients.values()]
+        self.broadcast({"type": "roster_update", "list": users_online})
 
     def handle_client(self, conn, addr):
         try:
@@ -15,9 +21,7 @@ class SecureRelayServer:
             if not auth_line: return
 
             auth_data = json.loads(auth_line.strip())
-            action = auth_data.get("action")
-            user = auth_data.get("user")
-            pwd = auth_data.get("pass")
+            action, user, pwd = auth_data.get("action"), auth_data.get("user"), auth_data.get("pass")
 
             if action == "register":
                 success, msg = self.db.register_user(user, pwd)
@@ -30,29 +34,69 @@ class SecureRelayServer:
             self.clients[conn] = user
             print(f"[AUTH] {user} zalogowany.")
 
+            time_now = datetime.now().strftime("%H:%M")
+            self.broadcast({"type": "notif", "content": f"{user} dołączył.", "time": time_now}, sender_conn=conn)
+            self.broadcast_roster()
+
             for line in stream:
                 packet = json.loads(line.strip())
-                self.broadcast(packet, sender_conn=conn)
+
+                if packet.get("type") == "msg":
+                    packet["author"] = user
+                    packet["time"] = datetime.now().strftime("%H:%M")
+                    self.broadcast(packet, sender_conn=conn)
+
+                elif packet.get("type") == "private_msg":
+                    target = packet.get("to")
+                    packet["author"] = user
+                    packet["time"] = datetime.now().strftime("%H:%M")
+                    packet["type"] = "private"
+                    self.send_to_user(target, packet)
+
+                elif packet.get("type") == "file":
+                    packet["author"] = user
+                    packet["time"] = datetime.now().strftime("%H:%M")
+                    target = packet.get("to")
+                    if target:
+                        self.send_to_user(target, packet)
+                    else:
+                        self.broadcast(packet, sender_conn=conn)
 
         except:
             pass
         finally:
-            self.clients.pop(conn, None)
+            user = self.clients.pop(conn, None)
+            if user:
+                time_exit = datetime.now().strftime("%H:%M")
+                self.broadcast({"type": "notif", "content": f" {user} wyszedł.", "time": time_exit})
+                self.broadcast_roster()
             conn.close()
 
-    def broadcast(self, packet, sender_conn):
+    def broadcast(self, packet, sender_conn=None):
         data = (json.dumps(packet) + "\n").encode("utf-8")
-        for client in self.clients:
+        for client in list(self.clients.keys()):
             if client != sender_conn:
                 try:
                     client.sendall(data)
                 except:
                     pass
 
+    def send_to_user(self, target_username, packet):
+        data = (json.dumps(packet) + "\n").encode("utf-8")
+        for conn, username in list(self.clients.items()):
+            if username == target_username:
+                try:
+                    conn.sendall(data)
+                except:
+                    pass
+                break
+
     def run(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("0.0.0.0", 5050))
-        s.listen()
+        s.listen(50)
+        print("SERWER URUCHOMIONY NA PORCIE 5050")
         while True:
             c, a = s.accept()
             threading.Thread(target=self.handle_client, args=(c, a), daemon=True).start()
