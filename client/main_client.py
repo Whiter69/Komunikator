@@ -7,8 +7,12 @@ import base64
 import os
 import queue
 
-
 class NexusApp(ctk.CTk):
+    """
+    Główna aplikacja okienkowa klienta zrealizowana w oparciu o framework CustomTkinter.
+    Łączy warstwę wizualną z mechaniką sieciową z pliku network.py.
+    """
+
     def __init__(self):
         super().__init__()
         self.title("Komunikator")
@@ -18,15 +22,16 @@ class NexusApp(ctk.CTk):
 
         self.network = SecureNetwork()
         self.all_users = []
-        self.dm_boxes = {}
+        self.dm_boxes = {}  # Słownik przechowujący obiekty zakładek prywatnych
         self.chat_font = ("Segoe UI", 15)
         self.notif_enabled = ctk.BooleanVar(value=True)
 
-        self.staged_file = None
+        self.staged_file = None  # Przechowuje załącznik gotowy do wysłania
 
         self.setup_auth_ui()
 
     def setup_auth_ui(self):
+        """Inicjalizuje i wyświetla kartę logowania oraz rejestracji."""
         self.auth = ctk.CTkFrame(self, fg_color="#0d0d0d")
         self.auth.pack(fill="both", expand=True)
 
@@ -36,33 +41,29 @@ class NexusApp(ctk.CTk):
         login_card.pack_propagate(False)
 
         ctk.CTkLabel(login_card, text="NEXUS", font=("Impact", 64), text_color="#2ecc71").pack(pady=(40, 0))
-        ctk.CTkLabel(login_card, text="SECURE TERMINAL", font=("Segoe UI", 13, "bold"), text_color="#555555").pack(
-            pady=(0, 20))
+        ctk.CTkLabel(login_card, text="SECURE TERMINAL", font=("Segoe UI", 13, "bold"), text_color="#555555").pack(pady=(0, 20))
 
         self.e_user = ctk.CTkEntry(login_card, placeholder_text="Login", width=340, height=50, border_color="#2ecc71")
         self.e_user.pack(pady=10)
 
-        self.e_pass = ctk.CTkEntry(login_card, placeholder_text="Hasło", show="*", width=340, height=50,
-                                   border_color="#2ecc71")
+        self.e_pass = ctk.CTkEntry(login_card, placeholder_text="Hasło", show="*", width=340, height=50, border_color="#2ecc71")
         self.e_pass.pack(pady=10)
 
         self.lbl_err = ctk.CTkLabel(login_card, text="", text_color="#2ecc71")
         self.lbl_err.pack(pady=5)
 
-        ctk.CTkButton(login_card, text="ZALOGUJ SIĘ", command=lambda: self.authenticate("login"), width=340, height=50,
-                      font=("Segoe UI", 16, "bold")).pack(pady=10)
-        ctk.CTkButton(login_card, text="REJESTRACJA", command=lambda: self.authenticate("register"), width=340,
-                      height=40, fg_color="transparent", border_width=2, text_color="#2ecc71",
-                      hover_color="#1a1a1a").pack(pady=5)
+        ctk.CTkButton(login_card, text="ZALOGUJ SIĘ", command=lambda: self.authenticate("login"), width=340, height=50, font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkButton(login_card, text="REJESTRACJA", command=lambda: self.authenticate("register"), width=340, height=40, fg_color="transparent", border_width=2, text_color="#2ecc71", hover_color="#1a1a1a").pack(pady=5)
         self.after(200, self.e_user.focus_set)
 
     def authenticate(self, action):
+        """Procesuje żądanie logowania. Przy sukcesie ładuje główny interfejs."""
         user, pwd = self.e_user.get().strip(), self.e_pass.get().strip()
         if not user or not pwd:
             self.lbl_err.configure(text="Wypełnij pola!")
             return
 
-        success, msg = self.network.connect_and_auth("127.0.0.1", action, user, pwd)
+        success, msg = self.network.connect_and_auth("localhost", action, user, pwd)
         self.lbl_err.configure(text=msg)
 
         if success and action == "login":
@@ -71,17 +72,18 @@ class NexusApp(ctk.CTk):
             self.poll_queue()
 
     def setup_main_ui(self):
+        """Buduje główny ekran komunikatora z zakładkami i panelem użytkowników."""
         self.main = ctk.CTkFrame(self, fg_color="#0d0d0d")
         self.main.pack(fill="both", expand=True)
         self.main.grid_columnconfigure(1, weight=1)
         self.main.grid_rowconfigure(0, weight=1)
 
+        # Panel Boczny
         self.sidebar = ctk.CTkFrame(self.main, width=280, fg_color="#161616", border_width=2, border_color="#333333")
         self.sidebar.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
         self.sidebar.grid_propagate(False)
 
-        ctk.CTkLabel(self.sidebar, text="Użytkownicy", font=("Segoe UI", 18, "bold"), text_color="#2ecc71").pack(
-            pady=(20, 5))
+        ctk.CTkLabel(self.sidebar, text="Użytkownicy", font=("Segoe UI", 18, "bold"), text_color="#2ecc71").pack(pady=(20, 5))
         self.search_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Szukaj...")
         self.search_entry.pack(fill="x", padx=20, pady=10)
         self.search_entry.bind("<KeyRelease>", self.draw_roster)
@@ -90,6 +92,7 @@ class NexusApp(ctk.CTk):
         self.scroll.pack(fill="both", expand=True, padx=10, pady=10)
         ctk.CTkSwitch(self.sidebar, text="Powiadomienia PUSH", variable=self.notif_enabled).pack(pady=20)
 
+        # Panel Czatów i Zakładek
         self.chat_container = ctk.CTkFrame(self.main, fg_color="transparent")
         self.chat_container.grid(row=0, column=1, sticky="nsew", padx=(0, 15), pady=15)
         self.chat_container.grid_rowconfigure(0, weight=1)
@@ -111,6 +114,7 @@ class NexusApp(ctk.CTk):
         self.dm_tabs = ctk.CTkTabview(self.tab_dm_root, fg_color="transparent")
         self.dm_tabs.pack(fill="both", expand=True)
 
+        # Wejście tekstu i załączniki
         input_frame = ctk.CTkFrame(self.chat_container, height=80, fg_color="#161616")
         input_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
@@ -126,11 +130,13 @@ class NexusApp(ctk.CTk):
                       command=self.send).pack(side="right", padx=(0, 15), pady=15)
 
     def log_event(self, text):
+        """Dodaje log systemowy do zakładki POWIADOMIENIA."""
         self.box_log.configure(state="normal")
         self.box_log.insert("end", f"[{datetime.now().strftime('%H:%M')}] {text}\n")
         self.box_log.configure(state="disabled")
 
     def get_box(self, name):
+        """Pobiera lub dynamicznie tworzy pole tekstowe dla rozmowy prywatnej."""
         if name not in self.dm_boxes:
             self.dm_tabs.add(name)
             b = ctk.CTkTextbox(self.dm_tabs.tab(name), state="disabled", font=self.chat_font)
@@ -139,11 +145,13 @@ class NexusApp(ctk.CTk):
         return self.dm_boxes[name]
 
     def prep_dm(self, name):
+        """Przełącza widok na rozmowę prywatną z konkretnym użytkownikiem."""
         self.get_box(name)
         self.dm_tabs.set(name)
         self.tabs.set("PRYWATNE ")
 
     def draw_roster(self, event=None):
+        """Aktualizuje i filtruje listę użytkowników online na panelu bocznym."""
         query = self.search_entry.get().lower()
         for w in self.scroll.winfo_children(): w.destroy()
 
@@ -154,6 +162,7 @@ class NexusApp(ctk.CTk):
                               text_color="#2ecc71", command=lambda n=name: self.prep_dm(n)).pack(fill="x", pady=2)
 
     def stage_file(self):
+        """Otwiera okno dialogowe i ładuje plik w formacie Base64 do pamięci (kolejkowanie)."""
         path = filedialog.askopenfilename(title="Wybierz plik do wysłania")
         if path:
             with open(path, "rb") as f:
@@ -167,6 +176,7 @@ class NexusApp(ctk.CTk):
             self.entry.configure(state="disabled", text_color="#f1c40f")
 
     def download_file(self, filename, data_b64):
+        """Zapisuje pobrany plik na dysku użytkownika."""
         path = filedialog.asksaveasfilename(initialfile=filename, title="Zapisz załącznik jako...")
         if path:
             try:
@@ -177,15 +187,14 @@ class NexusApp(ctk.CTk):
                 self.log_event(f"Błąd zapisu pliku: {e}")
 
     def send(self):
+        """Określa adresata i przekazuje dane (tekst lub plik) do silnika sieciowego."""
         time_str = datetime.now().strftime("%H:%M")
         current_tab = self.tabs.get()
         target = None
 
         if "PRYWATNE" in current_tab:
-            try:
-                target = self.dm_tabs.get() or None
-            except:
-                target = None
+            try: target = self.dm_tabs.get() or None
+            except: target = None
             if not target:
                 self.box_pub.configure(state="normal")
                 self.box_pub.insert("end", f"[{time_str}] SYSTEM: Wybierz najpierw użytkownika!\n")
@@ -222,6 +231,10 @@ class NexusApp(ctk.CTk):
             box.configure(state="disabled")
 
     def poll_queue(self):
+        """
+        Zarządza renderowaniem GUI. Asynchronicznie (co 50ms) sprawdza,
+        czy silnik sieciowy odebrał nowe pakiety, aby odrysować je na ekranie.
+        """
         try:
             while True:
                 data = self.network.queue.get_nowait()
@@ -249,10 +262,10 @@ class NexusApp(ctk.CTk):
                     time_str, target = data["time"], data.get("to")
 
                     box = self.get_box(author) if target else self.box_pub
-
                     box.configure(state="normal")
                     box.insert("end", f"[{time_str}] {author}: ")
 
+                    # Tworzenie klikalnego linku
                     tag_name = f"file_{datetime.now().timestamp()}"
                     box.insert("end", f"[POBIERZ PLIK] {filename}\n", tag_name)
 
@@ -276,7 +289,6 @@ class NexusApp(ctk.CTk):
         except queue.Empty:
             pass
         self.after(50, self.poll_queue)
-
 
 if __name__ == "__main__":
     app = NexusApp()
